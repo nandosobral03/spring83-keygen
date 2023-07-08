@@ -1,4 +1,5 @@
 extern crate rand_core;
+use chrono::Datelike;
 use ed25519_dalek::*;
 use rand_core::OsRng;
 use std::fs;
@@ -7,32 +8,39 @@ use std::thread;
 use std::thread::available_parallelism;
 
 const MAX_ITER: usize = 100_000_000;
-const NUM_THREADS: usize = 16;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut default_parallelism = available_parallelism().unwrap().get();
+
+    let year = chrono::Utc::now().year().to_string();
+    let mut year = &year[2..4];
+
     for i in 0..args.len() {
         if args[i] == "-t" {
             if i + 1 < args.len() {
                 default_parallelism = args[i + 1].parse::<usize>().unwrap();
             }
         }
+        if args[i] == "-y" {
+            if i + 1 < args.len() {
+                year = &args[i + 1];
+            }
+        }
     }
-
-    let timestart = chrono::Utc::now();
-    let command = &args[1];
-    match command.as_str() {
-        "sign" => sign(),
-        "generate" => generate(default_parallelism),
-        _ => println!("Usage: {} [sign|generate]", args[0]),
-    }
-    let timeend = chrono::Utc::now();
-    let duration = timeend - timestart;
+    println!(
+        "Searching for a key ending with {} or {}",
+        year.parse::<u8>().unwrap() - 1,
+        year,
+    );
+    let time_start = chrono::Utc::now();
+    generate(default_parallelism, hex::decode(year).unwrap()[0]);
+    let time_end = chrono::Utc::now();
+    let duration = time_end - time_start;
     println!("Time taken: {:?}s", duration.num_seconds());
 }
 
-fn generate(default_parallelism: usize) {
+fn generate(default_parallelism: usize, year: u8) {
     let result = Arc::new(Mutex::new(None));
     println!(
         "Executing on {} threads if you would prefer to use another number -t flag",
@@ -47,7 +55,7 @@ fn generate(default_parallelism: usize) {
                     let keypair: Keypair = Keypair::generate(&mut OsRng);
                     let public_key = keypair.public;
                     let secret_key = keypair.secret;
-                    if validate_key(public_key.to_bytes().as_slice()) {
+                    if validate_key(public_key.to_bytes().as_slice(), year) {
                         *result.lock().unwrap() = Some((public_key, secret_key));
                         break;
                     }
@@ -56,7 +64,7 @@ fn generate(default_parallelism: usize) {
                     if iter % 100000 == 0 {
                         println!("{} iterations in thread {:?}", iter, thread::current().id());
                     }
-                    if iter == MAX_ITER / NUM_THREADS {
+                    if iter == MAX_ITER / default_parallelism {
                         println!("No valid key found for thread {:?}", thread::current().id());
                         break;
                     }
@@ -83,44 +91,17 @@ fn generate(default_parallelism: usize) {
     }
 }
 
-fn sign() {
-    let html = "Secret".to_string();
-    let filename = "./keypair.txt";
-    let contents = fs::read_to_string(filename).expect("Something went wrong reading the file");
-    let lines: Vec<&str> = contents.split("\n").collect();
-    let keypair_string = format!("{}{}", lines[1], lines[3]);
-    let keypair_bytes = hex::decode(keypair_string).unwrap();
-    let keypair: Keypair = Keypair::from_bytes(&keypair_bytes).unwrap();
-    println!("{:?}", &html.as_bytes());
-    let signature = keypair.sign(html.as_bytes());
-    let signature = hex::encode(signature.to_bytes());
-    println!("SECRET {:?}", &keypair.secret.to_bytes());
-    println!("PUBLIC {:?}", &keypair.public.to_bytes());
-    println!("Done signing");
-
-    let public_key = lines[3];
-    println!("{}", public_key);
-    let public_key = PublicKey::from_bytes(hex::decode(public_key).unwrap().as_slice()).unwrap();
-    println!("Get public key");
-    let signature_from_hex = hex::decode(signature).unwrap();
-    let signature = Signature::from_bytes(signature_from_hex.as_slice()).unwrap();
-    public_key.verify(html.as_bytes(), &signature).unwrap();
-    println!("{}", signature);
-    println!("{}", html);
-}
-
-pub fn validate_key(key: &[u8]) -> bool {
+pub fn validate_key(key: &[u8], year: u8) -> bool {
     let year_bit = key[31];
 
     let month_bit = key[30];
-    // Month takes 2 nibs, if the first nib is 0, then the month is 0-9, its its 1 then the other nib is 0-2
     let first_nib = month_bit & 0xF0;
     let second_nib = month_bit & 0x0F;
 
     let nib3e = key[29];
     let nib8 = key[28] & 0x0F;
 
-    return (year_bit == 0x22 || year_bit == 0x23)
+    return (year_bit == year || year_bit == year - 1)
         && nib3e == 0x3e
         && nib8 == 0x8
         && ((first_nib == 0x10 && second_nib < 0x3) || (first_nib == 0x00 && second_nib < 0xA));

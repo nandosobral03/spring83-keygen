@@ -88,7 +88,15 @@ fn generate(default_parallelism: usize, year: u8) {
             hex::encode(public_key.to_bytes())
         );
         fs::write(filename, contents).expect("Unable to write file");
+        println!("Found keypair");
+        println!("Secret key: {}", hex::encode(secret_key.to_bytes()));
+        println!("Public key: {}", hex::encode(public_key.to_bytes()));
+        println!("Saved to {}", filename);
+    } else {
+        println!("No valid key found");
     }
+    println!("Press Ctrl+C to exit...");
+    loop {}
 }
 
 pub fn validate_key(key: &[u8], year: u8) -> bool {
@@ -104,5 +112,6 @@ pub fn validate_key(key: &[u8], year: u8) -> bool {
     return (year_bit == year || year_bit == year - 1)
         && nib3e == 0x3e
         && nib8 == 0x8
-        && ((first_nib == 0x10 && second_nib < 0x3) || (first_nib == 0x00 && second_nib < 0xA));
+        && ((first_nib == 0x10 && second_nib < 0x3)
+            || (first_nib == 0x00 && second_nib < 0xA && second_nib > 0x0));
 }
